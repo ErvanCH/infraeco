@@ -1,0 +1,279 @@
+---
+title: "<center>Guild `r GUILD` - `r guild.name`<center>"
+author: "<center>Ervan Rutishauser & Blaise Petitpierre (Info Flora)<center>"
+date: "<center>`r format(Sys.Date(), '%d %B, %Y')`<center>"
+output:
+  html_document: default
+  toc: true
+  fig_caption: yes
+  caption:
+  font-size: 1.0em
+  font-weight: bold
+  pdf_document:
+  word_document: default
+geometry: margin=2cm
+header-includes:
+- \usepackage{float}
+- \usepackage{placeins}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{listings}
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\includegraphics[width=2cm]{"C:\Dossier_Ervan\Admin\Logo info flora-rgb.jpg"}}
+- \posttitle{\end{center}}
+fontsize: 12pt
+rmarkdown::pdf_document:
+  fig_caption: yes
+caption:
+  font-size: 1.0em
+  font-weight: bold
+highlight: haddock
+---
+
+```{r setup global options, cache=FALSE, include=FALSE}
+require(knitr)
+output <- opts_knit$get("rmarkdown.pandoc.to")
+opts_chunk$set(fig.show='asis',fig.pos = 'h')
+if (output=="html") opts_chunk$set(fig.width=11, fig.height=11,message=FALSE,warning=F, fig_caption=T,tidy.opts=list(width.cutoff=30),tidy=TRUE)
+if (output=="pdf") opts_chunk$set(fig.width=6, fig.height=6,message=FALSE,warning=F, fig_caption=T,tidy.opts=list(width.cutoff=30),tidy=TRUE)
+knit_hooks$set(plot = function(x, options) {
+  paste('<figure><figcaption>', options$fig.cap, '</figcaption><img src="',
+        opts_knit$get('base.url'), paste(x, collapse = '.'),
+        '"></figure>',
+        sep = '')})
+```
+```{r Load objects & packages, echo=F,cache=FALSE, include=FALSE}
+library(data.table)
+library(kableExtra)
+library(ggplot2)
+library(knitr)
+# dir <- substr(getwd(),1,max(stringr::str_locate_all(getwd(),'/')[[1]]))
+# FF <- list.files(paste0(dir,"/data"))[grep("obs_filtered",dput(list.files(paste0(dir,"/data"))))]
+# IF <- file.info(paste(dir,"data", FF,sep="/"))
+# load(paste(dir,"data", FF[which.max(IF$mtime)],sep="/"))
+```
+
+### A. IST
+
+#### A.1 Species list
+
+```{r Load objects, eval=F, echo=F, fig.height=6, fig.pos='H', fig.show='asis', fig.width=6, message=FALSE, warning=FALSE, results='hide', tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+# RES <- unique(data.table::data.table("group"=obs$group,"species"=obs$name,"bioregion"=obs$bioregrion,"weight"=obs$w,prop_area_ha=as.numeric(NA),prop_area_percent=as.numeric(NA)))
+# NN <- data.table::setDT(obs)[,.(Qobs=ifelse(sum(w[!duplicated(taxonid)])>=1,1,0)),by=.(grid.id)]
+# system.time(for(i in 1:nrow(RES)){
+# NN2 <-  data.table::setDT(obs)[name!=RES[i,]$species,.(Qobs=ifelse(sum(w[!duplicated(taxonid)])>=1,1,0)),by=.(grid.id)]
+# RES[i,]$prop_area_ha <- nrow(NN[Qobs==1]) - nrow(NN2[Qobs==1])
+# RES[i,]$prop_area_percent <- (nrow(NN[Qobs==1]) - nrow(NN2[Qobs==1]))*100/nrow(NN[Qobs==1])
+# }) # 21 minutes
+# save(RES,file=paste0("C://Dossier_Ervan/R/INFOFAUNA/",GUILD,"_spContribution.Rdata"))
+```
+
+
+```{r Tab1, eval=T, echo=F,message=F,warning=F,fig.width=6,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+dir_if <- "C://Dossier_Ervan/R/INFOFAUNA"
+FF <- list.files(dir_if)[grep(paste0("_",GUILD,"_spContribution"),list.files(dir_if))]
+RES <- read.csv(paste(dir_if,FF,sep="/"))
+REF <- data.table::setDT(read.csv2("C:/Dossier_Ervan/Guildes&co/Notes/IE_MATRICE_PRIO_20200715.csv"))
+TT <- stringr::word(REF$TAXON_NAME, 1, 2)
+REF$speciesCODE <- TT
+SUB <- paste0(substr(stringr::word(REF$TAXON_NAME[grep("subsp.",REF$TAXON_NAME)], 2, 2),1,3),".")
+TT[grep("subsp.",REF$TAXON_NAME)] <- paste(TT[grep("subsp.",REF$TAXON_NAME)],SUB,sep=" ")
+REF$lab <- paste0(TT," (",REF$GROUP,")")
+RES <- unique(merge(RES,REF[,c("TAXON_ID_CH","lab","GROUP")],by.x="speciesCODE",by.y="TAXON_ID_CH",all.x=TRUE))
+RES2 <- data.table::setDT(RES)[!duplicated(lab),c("lab","Contribution","GROUP")][order(GROUP,-rank(Contribution),decreasing=F),]
+RES <- within(RES,lab[is.na(lab)] <- paste0(stringr::word(speciesCODE[is.na(lab)],1,2)," (",GROUP[is.na(lab)],")"))
+names(RES2) <- c("species","contribution","group")
+RES2 <- setDT(RES2)[!is.na(species),]
+
+kable(setDT(RES2)[,-"group"],col.names=c("Species","Contribution (%)"),caption = "<b>Table 1: Species list, sorted by group. Contributions (%) to IST are given.<b>") %>%
+ kable_styling("striped", full_width = F) %>%
+ pack_rows(index=table(RES2$group), label_row_css = "background-color: #666; color: #fff;") %>% 
+ scroll_box(width = "100%", height = "600px")
+SIZE <- ifelse(nrow(RES2)<10,10,ceiling(sqrt(nrow(RES2)))*2)
+```
+
+#### A.2 Contribution of each species to IST
+The contribution of each species is computed as the difference between the number of hectares including all species and excluding a given species.
+
+
+<style>
+  .superbigimage{
+      overflow-x:scroll;
+      white-space: nowrap;
+  }
+
+  .superbigimage img{
+     max-width: none;
+  }
+
+
+</style>
+
+
+<div class="superbigimage">
+```{r Hist1, eval=T, echo=F,message=F,warning=F,fig.width=SIZE,fig.height=4,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', out.width="80%",results='show',fig.cap="<b>Figure 1: Contribution (%) to guild space of each species<b>"}
+SZ=5
+RES2$species <- factor(RES2$species,levels=RES2$species[order(RES2$contribution,decreasing=T)])
+ggplot(RES2[!is.na(species),],aes(x=species,y=contribution,fill=contribution)) + geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 65, hjust = 1,size=SZ,face="bold"),axis.text.y = element_text(size=SZ,face="bold"),axis.title.y=element_text(size=SZ,face="bold")) + labs(legend.position="none",x="",y="Contribution to guild space (%)") + scale_fill_continuous(type="viridis",guide=FALSE)
+```
+
+</div>
+
+
+
+### B. Models 
+
+
+#### B.1 Models performance and selection 
+
+Models are selected based on several criterion, namely AUC, Sommer D, TSS and Boyce. Those citerion are averaged (Eval_mean) and models with a mean evaluation > 0.5 are selected (models in bold). The predictions of these best (selected) models are then used to predict quality. Average predictions among these models are shown, and referred to as 'quality pred'(icted).
+
+```{r tabmod, eval=T, echo=F,message=F,warning=F,fig.width=10,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+# dir <- substr(getwd(),1,max(stringr::str_locate_all(getwd(),'/')[[1]]))
+FF <- list.files(paste0(dir,"/model"))[grep("eval_mod",list.files(paste0(dir,"/model")))]
+load(paste0(dir,"/model/",FF))
+
+eval.lim<-0.5
+
+library(kableExtra)
+TT <- data.frame(MyModelEvaluation$mean_evaluation$model,sapply(MyModelEvaluation$mean_evaluation[,2:8],function(x) as.numeric(x)))
+names(TT) <- c("model","AUC","D","TSS_max","TSS_sensi","Sensi_scaled","Boyce","Eval_mean")
+TT <- TT[!TT$model%in%c("mean","w.mean"),]
+TT$selected <- ifelse(MyModelEvaluation$model_weight>eval.lim,"*","")
+kable(TT,format="html",digits=2, booktabs = T,caption = "<b>Table 2: Criterion of model evaluation for 4 models: RF=Random Forest,GBM=gradient boosting model, GAM = general additive model, ME=MaxEnt<b>") %>%
+  kable_styling(position = "center",c("striped")) %>% 
+  row_spec(which(MyModelEvaluation$model_weight>eval.lim), bold = TRUE, italic = F)
+```
+
+
+#### B.2 Importance of environmental variables selected
+```{r ImpoVar, eval=T, echo=F,message=F,warning=F,fig.width=10,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+load(paste0(dir,"/model/",GUILD,"-importance_variable.Rdata"))
+VarIm$var <- factor(VarIm$var,levels=VarIm$var[order(VarIm$wmean,decreasing=T)])
+
+library(ggplot2)
+ggplot(VarIm,aes(x=var,y=wmean,fill=wmean)) + geom_bar(stat="identity",color="black") + theme(axis.text.x=element_text(angle=65,size=10,vjust=0.9,hjust=1)) + labs(x="",y="Importance") + scale_fill_continuous(type="viridis",guide=FALSE) + geom_errorbar(aes(ymin=wmean, ymax=wmean+sd),width=.1, position=position_dodge(.9))
+
+```
+
+
+#### B.3 Watersheds clustering based on selected environmental variables 
+White polygons indicate watershed with no or <10 ha quality observed. Cluster id (cl.id) and watershed id (BV.id) are shown on mouse over.
+```{r BV, eval=T, echo=F,message=F,warning=F,fig.width=10,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+# dir <- substr(getwd(),1,max(stringr::str_locate_all(getwd(),'/')[[1]]))
+FF <- list.files(paste0(dir,"/data"))[grep("clusterBV",list.files(paste0(dir,"/data")))]
+IF <- file.info(paste(dir,"data", FF,sep="/"))
+load(paste(dir,"data", FF[which.max(IF$mtime)],sep="/"))
+require(data.table)
+# COL <- setDT(BV)[,.(N=length(unique(CLUST))),by=subreg][order(subreg)]
+# # COL$col <- randomcoloR::distinctColorPalette(nrow(COL)) ## 12 bioregions
+# # scales::show_col(COL$col)
+# COL$col <- c("darkorange1", "darkolivegreen4", "darkorchid3", "dodgerblue1", "gold2", "darkslategray2", 
+#              "gray", "deeppink2", "chartreuse1", "aquamarine1", "brown1", "cornsilk1")
+# COLbv <- NULL
+# for (j in 1:nrow(COL)) {
+#   C <- col2rgb(COL$col[j])[,1]
+#   ID <- which(C<(255-((1/max(COL$N[j]))*200)))
+#   NN <- c(0,0,0)
+#   NN[ID] <- (1/COL$N[j])*200
+#   col2 <- rgb(t(col2rgb(COL$col[j])[,1]) + NN,maxColorValue = 255)
+#   funcol <- colorRampPalette(c(COL$col[j],col2))
+#   COLbv <- c(COLbv,funcol(COL$N[j]))
+# }
+# # scales::show_col( funcol(COL$N[j]))
+# # scales::show_col(c(COL$col[j],col2))
+# require(leaflet)
+# BB <- setDT(BV)[,.(CLUST=unique(CLUST)),by=subreg][order(subreg)]
+# BB$col <- COLbv
+# 
+# pal <- colorFactor(
+#   palette = COL$col,
+#   domain = BB$CLUST
+# )
+# BV$col <- pal(BV$CLUST)
+sf::st_geometry(BV) <- "geometry"
+BV2 <- aggregate(BV,by=list(BV$CLUST),FUN=unique,do_union=F)
+sf::st_geometry(BV2) <- "geometry"
+Ncol <- as.numeric(tapply(BV$clust,factor(BV$bioreg),function(x) length(unique(x))))
+require(RColorBrewer)
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+COL1=sample(col_vector, sum(Ncol))
+CLUSTERS <- BV2[,1]
+names(CLUSTERS) <- c("Cluster ID","geometry")
+st_geometry(CLUSTERS) <- "geometry"
+CLUSTERS <- sf::st_transform(CLUSTERS,4326)
+
+mapview::mapview(CLUSTERS,zcol="Cluster ID",col.region=COL1,legend=F,alpha.region=0.8,map.types = "CartoDB.Positron",popup=leafpop::popupTable(CLUSTERS,feature.id=F),homebutton = FALSE)
+```
+
+### C. Summary statistic
+```{r sumstat, eval=T, echo=F,message=F,warning=F,fig.width=6,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+#  dir <- substr(getwd(),1,max(stringr::str_locate_all(getwd(),'/')[[1]]))
+#  FF <- list.files(paste0(dir,"/data"))[grep("coef",list.files(paste0(dir,"/data")))]
+# COF <- read.table(paste0(dir,"data/",FF))
+# 
+# MIN = COF[101,4]
+# MAX = 3
+
+  tab <- data.frame(var=c("Observed quality (IST)","Potential quality","Guild space","Erganzungsbedarf (ha)"),val=c(sum(res$observed_qual,na.rm=T),sum(res$potential_qual,na.rm=T),sum(res$EG,na.rm=T),sum(res$Erganzungsbedarf,na.rm=TRUE)))
+  tab$perc <-  round(tab$val*100/4140543,2)
+  # tab$perc2 <-  round(tab$area*100/1044976,2)
+  # tab$perc2 <- ifelse(tab$perc2>100,100,tab$perc2)
+  # MINMAX <- round(c(sum(res$ha_to_add_final,na.rm=T)*MIN,sum(res$ha_to_add_final,na.rm=T)*MAX))
+  # tab[4,3] <- paste0(MINMAX[1]," - ",MINMAX[2])
+  # tab[4,4] <-  paste0(round(MINMAX[1]*100/4140543,2)," - ",round(MINMAX[2]*100/4140543,2))
+  # # tab[4,5] <-  paste0(round(MINMAX[1]*100/1044976,2)," - ",ifelse(round(MINMAX[2]*100/1044976,2)>100,100,round(MINMAX[2]*100/1044976,2)))
+  
+  kable(tab,format="html",align=rep('c', 5),booktabs = T,col.names=c("","# ha","% CH"),caption = "<b>Table 3: Number sites (# sites) and corresponding area (area ha). proportion of Swiss territory (4140543 ha, % CH) for  observed (IST) and potential qualities, guild space, and Ergänzungsbedarf (ha).<b>") %>%
+  kable_styling(position = "center",c("striped"), full_width = TRUE)
+```
+
+#### C1. Summary by bioregion
+```{r tab bioregion, eval=T, echo=F,message=F,warning=F,fig.width=10,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show',opts.label ="squarefigure"}
+temp <- setDT(res)[!is.na(CLUST),c("BV.id","CLUST", "subreg","observed_qual", "potential_qual", "EG", "BV_area", "Erganzungsbedarf")]
+SUMA <- temp[,.(EB=sum(Erganzungsbedarf,na.rm=T)),by=subreg]
+bio <- sf::st_read("D:/SIG/data/bioregion_ch/REGBIO6_12_2/REGBIO6_12_2.shp",quiet=T)  ## nouvelle version Infofauna 10/07/20
+bio_1k <- sf::st_simplify(bio, preserveTopology = TRUE, dTolerance = 1000)
+
+bio_1k <- merge(bio_1k,SUMA,by.y="subreg",by.x="BIOREG_C12",all.x=TRUE)
+
+ggplot(bio_1k) +
+  geom_sf(aes(fill = BIOREG_R12)) +  
+  scale_fill_brewer(palette="Paired") +
+  geom_sf_label(aes(label = EB), fontface = "bold") +
+  guides(fill=guide_legend(title="")) +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        rect=element_blank(),
+        panel.spacing = unit(c(0, 0, 0, 0), "cm"),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        plot.title = element_text(hjust = 0.5)) +
+  labs(x="",y="",title="Erganzungsbedarf (ha) bei Bioregion") 
+
+```
+
+```{r rec.tab_bioreg, eval=T, echo=F,message=F,warning=F,fig.width=6,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+TAB1 <- setDT(bio_1k)[,c("BIOREG_R12", "EB")]
+kable(TAB1,caption = "<b>Table 4: Erganzungsbedarf (ha) bei Bioregion.<b>",col.names=c("Bioregion","ha")) %>%
+ kable_styling("striped", full_width = TRUE)
+```
+
+#### C2. Summary by watershed
+```{r rec.tab_BV, eval=T, echo=F,message=F,warning=F,fig.width=6,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+bioreg <- data.frame(bioregion=c(11, 21, 22, 23, 24, 31, 32, 41, 51, 52, 61, 62),name=c("Jura und Randen","Genferseegebiet","Rheingebiet","Oestliches Mittelland","Westliches Mittelland","Voralpen","Nordalpen","Oestliche Zentralalpen ","Westliche Zentralalpen","Engadin","Südalpen","Südlicher Tessin"))
+temp <- merge(temp,bioreg,by.x="subreg",by.y="bioregion",all.x=T)
+temp$potential_prop <- round(temp$potential_qual/temp$BV_area*100)
+temp$name <- factor(temp$name,levels=unique(temp$name[order(temp$subreg)]))
+temp <- temp[,c("subreg", "BV.id","EG", "CLUST", "observed_qual", "potential_qual", 
+ "BV_area", "name", "potential_prop", "Erganzungsbedarf"
+)]
+kable(setDT(temp[,-c("subreg","name","CLUST","BV_area")]),caption = "<b>Table 5: Number of hectares quality observed (observed_qual) and predicted (potential_qual), proportion of potential quality (potential_prop,%) in the watershed (BV.id) and Erganzungsbedarf (ha) by watershed (BV.id) and bioregion.<b>") %>%
+ kable_styling("striped", full_width = FALSE) %>%
+ pack_rows(index=table(temp$name), group_label=temp$name,label_row_css = "background-color: #808080; color: #fff;") %>%  scroll_box(width = "100%", height = "600px")
+
+```
+
+
+

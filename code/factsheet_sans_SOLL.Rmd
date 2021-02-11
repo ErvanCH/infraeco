@@ -1,0 +1,128 @@
+---
+title: "<center>Guild `r GUILD` - `r guild.name`<center>"
+author: "<center>Ervan Rutishauser & Blaise Petitpierre (Info Flora)<center>"
+date: "<center>`r format(Sys.Date(), '%d %B, %Y')`<center>"
+output:
+  html_document: default
+  toc: true
+  fig_caption: yes
+  caption:
+  font-size: 1.0em
+  font-weight: bold
+  pdf_document:
+  word_document: default
+geometry: margin=2cm
+header-includes:
+- \usepackage{float}
+- \usepackage{placeins}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{listings}
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\includegraphics[width=2cm]{"C:\Dossier_Ervan\Admin\Logo info flora-rgb.jpg"}}
+- \posttitle{\end{center}}
+fontsize: 12pt
+rmarkdown::pdf_document:
+  fig_caption: yes
+caption:
+  font-size: 1.0em
+  font-weight: bold
+highlight: haddock
+---
+
+```{r setup global options, cache=FALSE, include=FALSE}
+require(knitr)
+output <- opts_knit$get("rmarkdown.pandoc.to")
+opts_chunk$set(fig.show='asis',fig.pos = 'h')
+if (output=="html") opts_chunk$set(fig.width=11, fig.height=11,message=FALSE,warning=F, fig_caption=T,tidy.opts=list(width.cutoff=30),tidy=TRUE)
+if (output=="pdf") opts_chunk$set(fig.width=6, fig.height=6,message=FALSE,warning=F, fig_caption=T,tidy.opts=list(width.cutoff=30),tidy=TRUE)
+knit_hooks$set(plot = function(x, options) {
+  paste('<figure><figcaption>', options$fig.cap, '</figcaption><img src="',
+        opts_knit$get('base.url'), paste(x, collapse = '.'),
+        '"></figure>',
+        sep = '')})
+```
+```{r Load objects & packages, echo=F,cache=FALSE, include=FALSE}
+library(data.table)
+library(kableExtra)
+library(ggplot2)
+library(knitr)
+# dir <- substr(getwd(),1,max(stringr::str_locate_all(getwd(),'/')[[1]]))
+# FF <- list.files(paste0(dir,"/data"))[grep("obs_filtered",dput(list.files(paste0(dir,"/data"))))]
+# IF <- file.info(paste(dir,"data", FF,sep="/"))
+# load(paste(dir,"data", FF[which.max(IF$mtime)],sep="/"))
+```
+
+### A. IST
+
+#### A.1 Species list
+
+```{r Load objects, eval=F, echo=F, fig.height=6, fig.pos='H', fig.show='asis', fig.width=6, message=FALSE, warning=FALSE, results='hide', tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+# RES <- unique(data.table::data.table("group"=obs$group,"species"=obs$name,"bioregion"=obs$bioregrion,"weight"=obs$w,prop_area_ha=as.numeric(NA),prop_area_percent=as.numeric(NA)))
+# NN <- data.table::setDT(obs)[,.(Qobs=ifelse(sum(w[!duplicated(taxonid)])>=1,1,0)),by=.(grid.id)]
+# system.time(for(i in 1:nrow(RES)){
+# NN2 <-  data.table::setDT(obs)[name!=RES[i,]$species,.(Qobs=ifelse(sum(w[!duplicated(taxonid)])>=1,1,0)),by=.(grid.id)]
+# RES[i,]$prop_area_ha <- nrow(NN[Qobs==1]) - nrow(NN2[Qobs==1])
+# RES[i,]$prop_area_percent <- (nrow(NN[Qobs==1]) - nrow(NN2[Qobs==1]))*100/nrow(NN[Qobs==1])
+# }) # 21 minutes
+# save(RES,file=paste0("C://Dossier_Ervan/R/INFOFAUNA/",GUILD,"_spContribution.Rdata"))
+```
+
+
+```{r Tab1, eval=T, echo=F,message=F,warning=F,fig.width=6,fig.height=6,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', results='show'}
+
+dir_if <- "C://Dossier_Ervan/R/INFOFAUNA"
+FF <- list.files(dir_if)[grep(paste0("_",GUILD,"_spContribution"),list.files(dir_if))]
+RES <- read.csv(paste(dir_if,FF,sep="/"))
+
+if(GUILD==9) {
+  RES$speciesCODE <- stringr::word(RES$spName, 1, 2)
+}
+REF <- data.table::setDT(readxl::read_xlsx("C:/Dossier_Ervan/Guildes&co/Notes/tab_recap_20201209.xlsx",sheet=1))
+TT  <- stringr::word(REF$ESPECE, 1, 2)
+REF$speciesCODE  <-TT
+SUB <- paste0(substr(stringr::word(REF$ESPECE[grep("subsp.",REF$ESPECE)], 2, 2),1,3),".")
+TT[grep("subsp.",REF$TAXON_NAME)] <- paste(TT[grep("subsp.",REF$TAXON_NAME)],SUB,sep=" ")
+REF$lab <- paste0(TT," (",REF$GROUP,")")
+RES <- unique(merge(RES,REF[,c("speciesCODE","lab","GROUPE")],by="speciesCODE",all.x=TRUE))
+RES2 <- data.table::setDT(RES)[!duplicated(lab),c("lab","Contribution","GROUPE")][order(GROUPE,-rank(Contribution),decreasing=F),]
+RES <- within(RES,lab[is.na(lab)] <- paste0(stringr::word(speciesCODE[is.na(lab)],1,2)," (",GROUPE[is.na(lab)],")"))
+names(RES2) <- c("species","contribution","group")
+RES2 <- setDT(RES2)[!is.na(species),]
+
+kable(setDT(RES2)[,-"group"],col.names=c("Species","Contribution (%)"),caption = "<b>Table 1: Species list, sorted by group. Contributions (%) to IST are given.<b>") %>%
+ kable_styling("striped", full_width = F) %>%
+ pack_rows(index=table(RES2$group), label_row_css = "background-color: #666; color: #fff;") %>% 
+ scroll_box(width = "100%", height = "600px")
+SIZE <- ifelse(nrow(RES2)<10,10,ceiling(sqrt(nrow(RES2)))*2)
+```
+
+#### A.2 Contribution of each species to IST
+The contribution of each species is computed as the difference between the number of hectares including all species and excluding a given species.
+
+
+<style>
+  .superbigimage{
+      overflow-x:scroll;
+      white-space: nowrap;
+  }
+
+  .superbigimage img{
+     max-width: none;
+  }
+
+
+</style>
+
+
+<div class="superbigimage">
+```{r Hist1, eval=T, echo=F,message=F,warning=F,fig.width=SIZE,fig.height=4,fig.pos='H',tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.show='asis', out.width="80%",results='show',fig.cap="<b>Figure 1: Contribution (%) to guild space of each species<b>"}
+SZ=5
+RES2$species <- factor(RES2$species,levels=RES2$species[order(RES2$contribution,decreasing=T)])
+ggplot(RES2[!is.na(species),],aes(x=species,y=contribution,fill=contribution)) + geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 65, hjust = 1,size=SZ,face="bold"),axis.text.y = element_text(size=SZ,face="bold"),axis.title.y=element_text(size=SZ,face="bold")) + labs(legend.position="none",x="",y="Contribution to guild space (%)") + scale_fill_continuous(type="viridis",guide=FALSE)
+```
+
+</div>
+
+
+
