@@ -1,0 +1,94 @@
+---
+title: "<center> Variable selection<center>"
+author: "<center>Ervan Rutishauser & Blaise Petitpierre (Info Flora)<center>"
+date: "<center>`r format(Sys.Date(), '%d %B, %Y')`<center>"
+output:
+  html_document: default
+  toc: true
+  fig_caption: yes
+  caption:
+  font-size: 1.0em
+  font-weight: bold
+  pdf_document:
+  word_document: default
+geometry: margin=2cm
+header-includes:
+- \usepackage{float}
+- \usepackage{placeins}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{listings}
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\includegraphics[width=2cm]{"C:\Dossier_Ervan\Admin\Logo info flora-rgb.jpg"}}
+- \posttitle{\end{center}}
+fontsize: 12pt
+rmarkdown::pdf_document:
+  fig_caption: yes
+caption:
+  font-size: 1.0em
+  font-weight: bold
+highlight: haddock
+---
+
+```{r setup global options, cache=FALSE, include=FALSE}
+require(knitr)
+output <- opts_knit$get("rmarkdown.pandoc.to")
+opts_chunk$set(fig.show='asis',fig.pos = 'h')
+if (output=="html") opts_chunk$set(fig.width=11, fig.height=11,message=FALSE,warning=F, fig_caption=T,tidy.opts=list(width.cutoff=30),tidy=TRUE)
+if (output=="pdf") opts_chunk$set(fig.width=6, fig.height=6,message=FALSE,warning=F, fig_caption=T,tidy.opts=list(width.cutoff=30),tidy=TRUE)
+knit_hooks$set(plot = function(x, options) {
+  paste('<figure><figcaption>', options$fig.cap, '</figcaption><img src="',
+        opts_knit$get('base.url'), paste(x, collapse = '.'),
+        '"></figure>',
+        sep = '')})
+```
+```{r Load objects & packages, echo=F,cache=FALSE, include=FALSE}
+library(ggplot2)
+dir <- substr(getwd(),1,max(stringr::str_locate_all(getwd(),'/')[[1]]))
+select.var <-read.table(paste0(dir,"data/selection_var.txt"),sep='\t',header=T, stringsAsFactors = F)
+```
+### Figure 1: Non-parametric t-test P-values between background and presences for each variable
+```{r Load objects, eval=T, echo=F, fig.height=6, fig.width=10,fig.pos='H', fig.show='asis', message=FALSE, warning=FALSE, results='hide', tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+select.var$var <- factor(select.var$var,levels=select.var$var[order(select.var$p.val,decreasing=T)])
+SIZE <- 10
+gg <- ggplot(select.var,aes(x=var,y=p.val,fill=p.val)) + geom_bar(stat="identity") + labs(x="",y="P.val") + theme(axis.text.x = element_text(angle = 65, hjust = 1,size=SIZE,face="bold"),axis.text.y = element_text(size=SIZE,face="bold"),axis.title.y=element_text(size=SIZE,face="bold")) + scale_fill_continuous(type="viridis",guide=FALSE) + geom_hline(yintercept=0.05,col=2,linetype="dashed") + annotation_custom(grid::textGrob("0.05", gp = grid::gpar(col = "red")),xmin=-0.8, xmax=-0.8,ymin=0.05, ymax=0.05)
+g = ggplotGrob(gg)
+g$layout$clip[g$layout$name=="panel"] <- "off"
+grid::grid.draw(g)
+```
+
+
+### Figure 2: Correlation among variables (with P-value < 0.05) grouped
+
+```{r Cor, eval=T, echo=F, fig.height=7, fig.pos='H', fig.show='asis', fig.width=10, message=FALSE, warning=FALSE, results='hide', tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+ VAR2 <- select.var$var[select.var$p.val<=0.05]
+ IDX <- which(select.var$p.val<=0.05)
+ GROUP <- TT$group[!is.na(TT[,stringr::str_which(names(TT),paste0("G",GUILD,"$"))])][IDX]
+ 
+ library(reshape2)
+ A <- data.frame(group=GROUP,t(OBS[,..VAR2]))
+ G <- list()
+ for (i in (1:length(unique(GROUP)))){
+   G[[i]] <- melt(cor(t(A[A$group==unique(GROUP)[i],-1]), t(A[A$group==unique(GROUP)[i],-1])))
+ }
+ GR <- dput(unlist(lapply(G,nrow)))
+ DT <- data.table::rbindlist(G)
+ DT$group <- rep(unique(GROUP),GR)
+
+ggplot(DT,aes(x = Var1, y = Var2,fill = value)) + geom_tile() + facet_wrap(~group,scales="free") + scale_fill_distiller("Correlation",palette = "Spectral") + theme(axis.text.x = element_text(angle = 65, hjust = 1,size=SIZE))
+```
+
+
+### Figure 3: Importance variables from Random Forest model
+```{r RF, eval=T, echo=F, fig.height=6, fig.pos='H', fig.show='asis', fig.width=10, message=FALSE, warning=FALSE, results='hide', tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+
+### Random forest
+fmla <- as.formula(paste("Qobs ~ ", paste(VAR2,collapse = "+ ")))
+system.time(rf1 <- ranger::ranger(fmla, data=OBS,num.trees=1000,importance='impurity_corrected')) # 0.5 min
+IMPAR <- data.frame(var=names(rf1$variable.importance),imp=as.numeric(rf1$variable.importance))
+IMPAR$var <- factor(IMPAR$var,levels=IMPAR$var[order(IMPAR$imp,decreasing=T)])
+
+ggplot(IMPAR,aes(x=var,y=imp,fill=imp)) + geom_bar(stat="identity") + labs(x="",y="Importance (RF)") + theme(axis.text.x = element_text(angle = 65, hjust = 1,size=SIZE,face="bold"),axis.text.y = element_text(size=SIZE,face="bold"),axis.title.y=element_text(size=SIZE,face="bold")) + scale_fill_continuous(type="viridis",guide=FALSE)
+```
+
+
