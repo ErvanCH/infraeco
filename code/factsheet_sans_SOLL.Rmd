@@ -75,7 +75,7 @@ dir_if <- "C://Dossier_Ervan/R/INFOFAUNA"
 FF <- list.files(dir_if)[grep(paste0("_",GUILD,"_spContribution"),list.files(dir_if))]
 RES <- read.csv(paste(dir_if,FF,sep="/"))
 
-if(GUILD==9) {
+if(GUILD%in%c(9,"18a")) {
   RES$speciesCODE <- stringr::word(RES$spName, 1, 2)
 }
 REF <- data.table::setDT(readxl::read_xlsx("C:/Dossier_Ervan/Guildes&co/Notes/tab_recap_20201209.xlsx",sheet=1))
