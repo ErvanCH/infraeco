@@ -739,143 +739,17 @@ model.eval<-function(pred,obs){
   return(my.eval)
 }
 
-cv.fun <- function(this.fold, data,my.var,RF=TRUE,GBM=TRUE,GBM.param=B,GAM=TRUE,my.k='k=6',
-                   ME=TRUE,me.method='maxnet',me.regmul=1,me.classes='lqh',
-                   ENSEMBLE = TRUE, eval.lim=0.5){
-  
-  my.models<-c(RF,GBM,GAM,ME)
-  names(my.models)<-c('RF','GBM','GAM','ME')
-  stopifnot(length(which(my.models))>0)
-  
-  fmla <- as.formula(paste("Qobs ~ ", paste(my.var,collapse = "+ ")))
-  
-  training <- setDT(data)[my.folds != this.fold]
-  validation <- setDT(data)[my.folds == this.fold]
-  
-  eval.rf1<-NA
-  if(RF){
-    rf1 <- ranger::ranger(fmla, data=training,num.trees=1000)
-    pred.rf1 <- predict(rf1,validation,type="response")$predictions
-    
-    #Evaluation of the rf model
-    eval.rf1<-model.eval(pred.rf1,validation$Qobs)
-  }
-  
-  eval.brt<-NA
-  if(GBM){  
-    # Split data into training and test
-    training.gbm <- training
-    testing.gbm <- validation
-    
-    params <- list(booster = "gbtree", objective = "binary:logistic", eta=GBM.param$eta, gamma=GBM.param$gamma, 
-                   max_depth=GBM.param$max_depth, min_child_weight=GBM.param$min_child_weight, subsample=GBM.param$subsample, 
-                   colsample_bytree=GBM.param$colsample_bytree)
-    
-    # Using the inbuilt xgb.cv function, let's calculate the best nround for this model. In addition, this function also returns CV error, which is an estimate of test error.
-    dtrain <- xgb.DMatrix(as.matrix(training.gbm[,..my.var]), label=training.gbm$Qobs)
-    dtest <- xgb.DMatrix(as.matrix(testing.gbm[,..my.var]), label=testing.gbm$Qobs)
-    
-    xgbcv <- xgb.cv( params = params, data = dtrain, nrounds = 500, nfold = 5, showsd = TRUE, stratified = TRUE, print_every_n = 10, early_stopping_rounds = 20, maximize = TRUE, eval_metric = "auc")
-    MIN <- which.max(xgbcv$evaluation_log$test_auc_mean)
-    
-    #first default - model training
-    xgb1 <- xgb.train (params = params, data = dtrain, nrounds = MIN, watchlist = list(val=dtest,train=dtrain),  print_every_n= 10, early_stopping_rounds = 20, maximize = TRUE , eval_metric = "auc")
-    
-    TEST <-  xgb.DMatrix(as.matrix(validation[,..my.var]),label=validation$Qobs)
-    pred.brt <- predict (xgb1,TEST)
-    
-    ### evaluation BRT
-    eval.brt<-model.eval(pred.brt,validation$Qobs)
-    
-  }
-  
-  eval.gam<-NA
-  if (GAM){
-    # GAM model
-    fmlaG <- as.formula(paste("Qobs ~ ", paste('s(',my.var,',',my.k,')',collapse = "+ ")))
-    BAM <- mgcv::bam(fmlaG,data=training,family=binomial)
-    pred.gam <- as.numeric(predict(BAM,newdata=validation,type="response"))
-    # rm(list=c("BAM"))
-    
-    ### evaluation BRT
-    eval.gam<-model.eval(pred.gam,validation$Qobs)
-  }
-  
-  eval.m<-NA
-  if (ME){
-    # MAXENT model
-    if (add.para$me.method$me.method=='dismo'){
-      ME_regmul<-paste0('betamultiplier=',as.numeric(add.para$me.regmul))
-      if(add.para$me.classes=='lqh'){
-        my.args=c(ME_regmul,'threshold=false','product=false')
-      }else{
-        my.args=ME_regmul
-      }
-      train.m<-maxent(x=training[,..my.var],p=as.data.frame(training$Qobs),args=my.args)
-      pred<-predict(train.m,as.data.frame(validation)[,my.var],type='cloglog')
-    }
-    if (me.method=='maxnet'){
-      p=training$Qobs
-      data.me=training[,..my.var]
-      train.m <- maxnet(p, data.me,f=maxnet.formula(p,data.me,me.classes), regmult=me.regmul)
-      pred.m<-predict(train.m,validation,type='cloglog')  
-    }
-    ### evaluation MAXENT
-    eval.m<-model.eval(pred.m,validation$Qobs)
-  }  
-  ### Average model
-  pred.models<-c()
-  eval.average<-rep(NA,6)
-  eval.w.average<-rep(NA,6)
-  
-  if (ENSEMBLE & length(my.models>1)){
-    if(RF){pred.models<-cbind(pred.models,pred.rf1)}
-    if(GBM){pred.models<-cbind(pred.models,pred.brt)}
-    if(GAM){pred.models<-cbind(pred.models,pred.gam)}
-    if(ME){pred.models<-cbind(pred.models,pred.m)}
-    
-    pred.mean <- apply(pred.models,1,mean) #average
-    
-    #weighted average model
-    w.coef<-c()
-    
-    if(RF){w.coef<-c(w.coef,mean(eval.rf1[c(2,3,5,6)]))}
-    if(GBM){w.coef<-c(w.coef,mean(eval.brt[c(2,3,5,6)]))}
-    if(GAM){w.coef<-c(w.coef,mean(eval.gam[c(2,3,5,6)]))}
-    if(ME){w.coef<-c(w.coef,mean(eval.m[c(2,3,5,6)]))} #coeff to weight the model following their performances
-    
-    w.coef.lim<-w.coef
-    w.coef.lim[which(w.coef.lim<eval.lim)]<-0 # Model below user defined threshold have no weight !!
-    
-    if(sum(w.coef.lim>0)){
-      pred.w.mean<-apply(pred.models,1,weighted.mean,w=w.coef.lim)
-      
-    }else{
-      pred.w.mean<-apply(pred.models,1,weighted.mean,w=w.coef)
-    }
-    
-    ### Evaluation of the weighted average model
-    eval.w.average<-model.eval(pred.w.mean,validation$Qobs)
-    
-    ### Evaluation of the average model
-    eval.average<-model.eval(pred.mean,validation$Qobs)
-  }
-  
-  my.eval<-rbind(eval.rf1,eval.brt,eval.gam,eval.m,eval.average,eval.w.average)
-  return(my.eval)
-  
-}
-
-
-
 
 model.proj<-function(proj.data,selected.models,cal.data,my.var,add.para,save.dir = getwd(),
-                     Npart=list('RF'= 1, 'GAM' =10, 'GBM' = 5,'MAXENT'=5 )){
+                     Npart=Npart){
+  
   # # # ## Debug
+  # load("G://R/G2-Eaux_dynamiques/data/2_enviro4debug.RData")
+  # pacman::p_load(parallel, doParallel , ranger , xgboost , caret , data.table, mgcv , dismo , rJava  , Hmisc , dplyr , maxnet,lightgbm,methods)
   # cal.data=as.data.frame(obs.mod)
   # proj.data = env.pot.mod
   # my.var= VAR
-  # Npart=list('RF'= 1, 'GAM' =50, 'GBM' = 5,'MAXENT'=5)
+  # Npart=list('RF'= 1, 'GBM' = 15,'GAM' =10,'MAXENT'=5)
 
   fmla <- as.formula(paste("Qobs ~ ", paste(my.var,collapse = "+ ")))
   if(nrow(cal.data)>5000){
@@ -908,6 +782,34 @@ model.proj<-function(proj.data,selected.models,cal.data,my.var,add.para,save.dir
   
   ## Boosted regression trees
   if(selected.models=='GBM'){
+    inTrain <- createDataPartition(y = cal.data$grid.id, p = 0.80, list = FALSE)  # 80% des données
+    training <- cal.data[inTrain,]
+    testing <- cal.data[-inTrain,]
+
+    dtrain <- list(data=Matrix::Matrix(as.matrix(training[,my.var]),sparse=T),label=training$Qobs)
+    dtest <- list(data=Matrix::Matrix(as.matrix(testing[,my.var]),sparse=T),label=testing$Qobs)
+    
+    mod <- lgb.load(paste(dest.folder,list.files(dest.folder)[grep("lgb.mod",list.files(dest.folder))],sep="/"))
+   
+    ## Predictions
+    pred<-vector(length=nrow(proj.data))
+    pdata <- list(data=Matrix::Matrix(as.matrix(proj.data[,VAR]),sparse=T))
+    pred <- predict(mod,pdata$data)
+    
+    TEST.lvar<- list(data=Matrix::Matrix(as.matrix(as.data.frame(cal.data)[l.var,my.var]),sparse=T),label=l.var)
+    pred.lvar<-predict(mod,TEST.lvar$data)
+    cal.datai<-cal.data[l.var,my.var]
+    var.imp<-c()
+      for (i in 1:length(my.var)){
+        cal.datai<-cal.data[l.var,my.var]
+        cal.datai[,i]<-sample(cal.datai[,i])
+        TEST.lvar<- list(data=Matrix::Matrix(as.matrix(cal.datai),sparse=T),label=l.var)
+        var.imp<-c(var.imp,cor(pred.lvar,predict(mod,TEST.lvar$data)))
+      }
+     } ## end of GBM
+  
+  ## Boosted regression trees
+  if(selected.models=='GBM_xg'){
     
     inTrain <- createDataPartition(y = cal.data$grid.id, p = 0.80, list = FALSE)  # 80% des données 
     training <- cal.data[inTrain,]
@@ -945,7 +847,7 @@ model.proj<-function(proj.data,selected.models,cal.data,my.var,add.para,save.dir
         pred [my.part[[j]]] <- predict (mod,proj.matrix)
         
       }
-     
+      
       M1<-as.data.frame(cal.data)[l.var,my.var]
       TEST.lvar<-xgb.DMatrix(as.matrix(M1),label=l.var)
       pred.lvar<-predict(mod,TEST.lvar)
@@ -976,6 +878,7 @@ model.proj<-function(proj.data,selected.models,cal.data,my.var,add.para,save.dir
     pred <- P[[1]][[2]]
     
   } ## end of GBM loop
+  
   
   # GAM model 
   if(selected.models=='GAM'){
@@ -1048,12 +951,11 @@ model.proj<-function(proj.data,selected.models,cal.data,my.var,add.para,save.dir
         cal.datai[,i]<-sample(cal.datai[,i])
         var.imp<-c(var.imp,cor(pred.lvar,predict(mod,cal.datai,type='cloglog')))
       }
-    }
-  }
-  
+    }} # end of maxent
+
   var.imp<-1-var.imp
   full.model<-list(model=mod,varImp = var.imp,guild.pred =pred)
-  save(full.model,file = paste0(save.dir,'/mod_',selected.models,'.Rdata'))
+  save(full.model,file = paste0(save.dir,"/mod_",selected.models,'.Rdata'))
   full.model
 }
 
@@ -1063,7 +965,7 @@ model.proj<-function(proj.data,selected.models,cal.data,my.var,add.para,save.dir
 #=================================================================================================================================
 
 
-mod.table<-function(GAM=T,ME=T,cv=cv,gam.smoothing=my.k,
+mod.table<-function(GAM=T,ME=T,GBM=T,GBM_xg=T,cv=cv,gam.smoothing=my.k,
                     ME.method='maxnet',ME.regmul=my.regmul,ME.classes=me.classes
 ){
   t.table<-matrix(nrow=0,ncol=8)
@@ -1073,16 +975,22 @@ mod.table<-function(GAM=T,ME=T,cv=cv,gam.smoothing=my.k,
       t.table<-rbind(t.table,t.tablei)
     }
   
-  if(any(grepl("GBM",names(PAR)))){
+  if(GBM==T){
     for (i in 1:length(cv)){
-      for (j in 1:length(PAR$GBM.para)){
-        t.tablei<-c(paste0('GBM_cv_',cv[i]),'GBM',cv[i],j,rep('',4))
+        t.tablei<-c(paste0('GBM_cv_',cv[i]),'GBM',cv[i],1,rep('',4))
         t.table<-rbind(t.table,t.tablei)
-      }
     }
   }
   
-  if(any(grepl("GAM",names(PAR)))|GAM==T){
+  if(GBM_xg==T){
+    for (i in 1:length(cv)){
+      t.tablei<-c(paste0('GBM_xg_cv_',cv[i]),'GBM_xg',cv[i],1,rep('',4))
+      t.table<-rbind(t.table,t.tablei)
+    }
+  }
+  
+  
+  if(GAM==T){
     for (i in 1:length(cv)){
       for (j in 1:length(gam.smoothing)){
         t.tablei<-c(paste0('GAM_cv_',cv[i]),'GAM',cv[i],'',gam.smoothing[j],rep('',3))
@@ -1091,7 +999,7 @@ mod.table<-function(GAM=T,ME=T,cv=cv,gam.smoothing=my.k,
     }
   }
 
-  if(any(grepl("ME",names(PAR)))|ME==T){
+  if(ME==T){
     for (i in 1:length(cv)){
       if(ME.method=='dismo'){
         for (j in 1:length(ME.classes)){
@@ -1110,20 +1018,21 @@ mod.table<-function(GAM=T,ME=T,cv=cv,gam.smoothing=my.k,
         }
     }
   }
-  colnames(t.table)<-c('mod_name','model','cv','GBM.para','GAM_k','ME_method','ME_regmul',
+  colnames(t.table)<-c('mod_name','model','cv','GBM_par','GAM_k','ME_method','ME_regmul',
                        'ME_classes')
   row.names(t.table)<-c()
   return(t.table) 
 }
 
 eval.mod<-function(row.number,mod_table,data=obs.mod,my.var=VAR,GBM.param){
-  # # # ## Debug 
-  # mod_table=tune.table
+  
+  # ### ## Debug
+  # mod_table=my_table
   # data=obs.mod
   # my.var=VAR
   # row.number=6
-  
-  
+  # GBM.param = PAR$GBM.param
+
   mod_table<-as.list(mod_table[row.number,])
   training <- setDT(data)[my.folds != mod_table$cv]
   validation <- setDT(data)[my.folds == mod_table$cv]
@@ -1137,7 +1046,54 @@ eval.mod<-function(row.number,mod_table,data=obs.mod,my.var=VAR,GBM.param){
     eval<-model.eval(pred,validation$Qobs)
   }
   
-  if(mod_table$model=='GBM'){  
+  if (mod_table$model=='GAM'){
+    # GAM model
+    fmlaG <- as.formula(paste("Qobs ~ ", paste('s(',my.var,',',mod_table$GAM_k,')',collapse = "+ ")))
+    BAM <- mgcv::bam(fmlaG,data=training,family=binomial)
+    pred<- as.numeric(predict(BAM,newdata=validation,type="response"))
+    
+    ### evaluation BRT
+    eval<-model.eval(pred,validation$Qobs)
+  }
+  
+  if (mod_table$model=='GBM'){
+    dtrain <- lgb.Dataset(as.matrix(training[,..my.var]),label=training$Qobs)
+    dtest <- lgb.Dataset(as.matrix(validation[,..my.var]),label= validation$Qobs)
+    test <- list(data=Matrix::Matrix(as.matrix(validation[,..my.var]),sparse=T),label= validation$Qobs)
+    
+    # GBM model
+    gbm_mod <- lgb.train(
+      list(objective         = "binary",
+           metric            = "auc",
+           learning_rate     = 0.1,
+           min_child_samples = 100,
+           max_bin           = 100,
+           subsample_freq    = 1,
+           num_leaves        = GBM.param$num_leaves,
+           max_depth         = GBM.param$max_depth,
+           subsample         = GBM.param$subsample,
+           colsample_bytree  = GBM.param$colsample_bytree,
+           min_child_weight  = GBM.param$min_child_weight,
+           scale_pos_weight  = GBM.param$scale_pos_weight
+           ),
+      dtrain,
+      valids = list(validation = dtest),
+      nthread = 4, 
+      nrounds = 5, # increase/ decrease rounds
+      verbose= 1, 
+      early_stopping_rounds = 2,
+      min_data=1,
+      min_hess=0
+    )
+    
+    lgb.save(gbm_mod, paste0(dest.folder,"/",GUILD,"_lgb.mod.txt"))
+    pred <-  predict(gbm_mod,test$data)
+    
+    ### evaluation BRT
+    eval<- model.eval(pred,validation$Qobs)
+  }
+  
+  if(mod_table$model=='GBM_xg'){  
     # Split data into training and test
     training.gbm <- training
     testing.gbm <- validation
@@ -1158,16 +1114,6 @@ eval.mod<-function(row.number,mod_table,data=obs.mod,my.var=VAR,GBM.param){
     
     TEST <-  xgb.DMatrix(as.matrix(validation[,..my.var]),label=validation$Qobs)
     pred <- predict (xgb1,TEST)
-    
-    ### evaluation BRT
-    eval<-model.eval(pred,validation$Qobs)
-  }
-  
-  if (mod_table$model=='GAM'){
-    # GAM model
-    fmlaG <- as.formula(paste("Qobs ~ ", paste('s(',my.var,',',mod_table$GAM_k,')',collapse = "+ ")))
-    BAM <- mgcv::bam(fmlaG,data=training,family=binomial)
-    pred<- as.numeric(predict(BAM,newdata=validation,type="response"))
     
     ### evaluation BRT
     eval<-model.eval(pred,validation$Qobs)
@@ -1223,7 +1169,8 @@ ensemble.eval<-function(data,eval.synth,model_eval,eval.lim=0.5){
   for(i in unique(eval.synth$model)){
     preds<-model_eval[which(eval.synth$model==i)]
     preds<-do.call(c,sapply(preds, function(x) x$prediction)) 
-    mod.preds<-cbind(mod.preds,preds)  }
+    mod.preds<-cbind(mod.preds,preds)  
+    }
   colnames(mod.preds)<-unique(eval.synth$model)
   
   ### Average model
@@ -1231,7 +1178,7 @@ ensemble.eval<-function(data,eval.synth,model_eval,eval.lim=0.5){
   eval.w.average<-rep(NA,6)
   w.coef<-mod.mean_evaluation$mean_evaluation
   w.coef.lim<-w.coef
-  w.coef.lim[which(w.coef.lim<eval.lim|is.na(w.coef))]<-0 # Model below user defined threshold have no weight !!
+  # w.coef.lim[which(w.coef.lim<eval.lim|is.na(w.coef))]<-0 # Model below user defined threshold have no weight !!
   names(w.coef)<-mod.mean_evaluation$model
   
   pred.mean <- apply(mod.preds,1,mean) #average
